@@ -270,7 +270,7 @@ def track_users(update: Update, context: CallbackContext) -> None:
     #     context.user_data["name"] = update.message.text
 
 def get_config():
-    file = open("config.config").read()
+    file = open("config/config.config").read()
     config = eval(file)
     return config
 
