@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, \
     CallbackQueryHandler, TypeHandler
 
-# Local Nodule
+# Local Modules
 from Broker.Broker import Broker
 
 logger = logging.getLogger(__name__)
@@ -30,59 +30,79 @@ def help_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text('Help!')
 
 
-def get_stock(update: Update, context: CallbackContext) -> None:
-    res = get_stock_state(update.message.text)
+def get_user(update):
+    id = str(update.effective_user.id)
+    f = open("users_data/" + id + ".json", 'r')
+    user = json.load(f)
+    f.close()
+    return user
+
+
+def save_user(user):
+    f = open("users_data/" + str(user['id']) + ".json", "w")
+    json.dump(user, f)
+    f.close()
+
+
+def get_stock_by_msg(msg, filter_words):
+    stocks_name = msg.split(" ")
+    stocks_name = list(filter(lambda word: word not in filter_words, stocks_name))
+
+    if len(stocks_name) == 1:
+        stock = stocks_name[0]
+        return check_stock(stock)
+    elif len(stocks_name):
+        stocks = []
+        for stock in stocks_name:
+            stock.append(check_stock(stock))
+        return stocks
+
+
+def get_favorite(user, stock):
+    favorite = list(filter(lambda favorite: favorite["name"].lower() == stock['name'].lower(), user['favorites']))
+    favorite = favorite[0] if len(favorite) > 0 else favorite
+    return favorite
+
+
+def main_handler(update: Update, context: CallbackContext) -> None:
     msg = update.message.text.lower()
     if "избранное" in msg or "избранного" in msg:
-        id = str(update.effective_user.id)
-        f = open("users_data/"+id+".json", 'r')
-        user = json.load(f)
+        user = get_user(update)
         if "сохранить" in msg or "добавить" in msg:
-            stocks_name = msg.split(" ")
-            stocks_name = list(filter(lambda word: word not in ["избранное", "сохранить", "в", "добавить"], stocks_name))
-            for stock in stocks_name:
-                stock = check_stock(stock)
-                favorite = list(filter(lambda favorite: favorite["name"].lower() == stock['name'].lower(), user['favorites']))
-                favorite = favorite[0] if len(favorite)>0 else favorite
-                if favorite:
-                    update.message.reply_text("Инструмент " + str(stock['name']) + " уже в избранном")
-                else:
-                    user['favorites'].append({'name': stock['name'], 'price': stock['price'], 'best_price': stock['best_price']})
-                    update.message.reply_text("Инструмент " + str(stock['name']) + " добавлен в избранное")
-            f.close()
-            f = open("users_data/"+id+".json", "w")
-            json.dump(user, f)
+            filter_words = ["избранное", "сохранить", "в", "добавить"]
+            stock = get_stock_by_msg(msg, filter_words)
+            favorite = get_favorite(user, stock)
+            if favorite:
+                update.message.reply_text("Инструмент " + str(stock['name']) + " уже в избранном")
+            else:
+                user['favorites'].append(
+                    {'name': stock['name'], 'price': stock['price'], 'best_price': stock['best_price']})
+                save_user(user)
+                update.message.reply_text("Инструмент " + str(stock['name']) + " добавлен в избранное")
         elif "удалить" in msg or "убрать" in msg:
-            stocks_name = msg.split(" ")
-            stocks_name = list(
-                filter(lambda word: word not in ["избранного", "удалить", "из", "убрать"], stocks_name))
-            for stock in stocks_name:
-                stock = check_stock(stock)
-                favorite = list(filter(lambda favorite: favorite["name"].lower() == stock['name'].lower(), user['favorites']))
-                favorite = favorite[0] if len(favorite)>0 else favorite
-                logger.info(favorite)
-                if favorite:
-                    user['favorites'].remove(favorite)
-                    update.message.reply_text("Инструмент " + str(stock['name']) + " удалён из избранного")
-            f.close()
-            f = open("users_data/"+id+".json", "w")
-            json.dump(user, f)
+            filter_words = ["избранного", "удалить", "из", "убрать"]
+            stock = get_stock_by_msg(msg, filter_words)
+            favorite = get_favorite(user, stock)
+            if favorite:
+                user['favorites'].remove(favorite)
+                save_user(user)
+                update.message.reply_text("Инструмент " + str(stock['name']) + " удалён из избранного")
         else:
-            for stock in user['favorites']:
-                res = get_stock_state(stock["name"])
-                update.message.reply_text(res)
-            if(len(user['favorites'])==0):
+            if len(user['favorites']) == 0:
                 update.message.reply_text("Избранное пусто")
-        f.close()
+            else:
+                for stock in user['favorites']:
+                    res = get_stock_state(stock["name"])
+                    update.message.reply_text(res)
     elif "изменения" in msg:
-        id = str(update.effective_user.id)
-        f = open("users_data/"+id+".json", 'r')
-        user = json.load(f)
+        user = get_user(update)
     else:
+        res = get_stock_state(update.message.text)
         if type(res) == str:
             update.message.reply_text(res)
         else:
             update.message.reply_text('Уточни что вы имели ввиду:', reply_markup=res)
+
 
 def check_stock(stock_name):
     broker = Broker()
@@ -102,7 +122,7 @@ def check_stock(stock_name):
         return False
 
 
-def get_stock_back(update: Update, context: CallbackContext) -> None:
+def stock_back_handler(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
     res = get_stock_state(query.data)
@@ -136,20 +156,21 @@ def get_stock_state(stock_name):
     else:
         return "Инструментов с таким названием не найдено"
 
-def track_users(update: Update, context: CallbackContext) -> None:
+
+def track_users_handler(update: Update, context: CallbackContext) -> None:
     """Store the user id of the incoming update, if any."""
     id = str(update.effective_user.id)
-    if not os.path.isfile("users_data/"+id+".json"):
-        f = open("users_data/"+id+".json", "a")
-        f.write('{"id": '+id+', "favorites":[]}')
+    if not os.path.isfile("users_data/" + id + ".json"):
+        f = open("users_data/" + id + ".json", "a")
+        f.write('{"id": ' + id + ', "favorites":[]}')
         f.close()
-    # if context.user_data.get("name") is None:
-    #     context.user_data["name"] = update.message.text
+
 
 def get_config():
     file = open("config/config.config").read()
     config = eval(file)
     return config
+
 
 def main() -> None:
     config = get_config()
@@ -157,12 +178,12 @@ def main() -> None:
 
     dispatcher = updater.dispatcher
 
-    dispatcher.add_handler(TypeHandler(Update, track_users), group=-1)
+    dispatcher.add_handler(TypeHandler(Update, track_users_handler), group=-1)
     dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CallbackQueryHandler(get_stock_back))
+    dispatcher.add_handler(CallbackQueryHandler(stock_back_handler))
     dispatcher.add_handler(CommandHandler("help", help_command))
 
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, get_stock))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, main_handler))
 
     updater.start_polling()
 
