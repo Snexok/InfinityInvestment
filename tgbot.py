@@ -35,49 +35,49 @@ def get_stock(update: Update, context: CallbackContext) -> None:
     msg = update.message.text.lower()
     if "избранное" in msg or "избранного" in msg:
         id = str(update.effective_user.id)
-        f = open(id + ".json", 'r')
+        f = open("users_data/"+id+".json", 'r')
         user = json.load(f)
-        logger.info(user)
         if "сохранить" in msg or "добавить" in msg:
             stocks_name = msg.split(" ")
             stocks_name = list(filter(lambda word: word not in ["избранное", "сохранить", "в", "добавить"], stocks_name))
             for stock in stocks_name:
-                if stock not in user:
-                    stock = check_stock(stock)
-                    logger.info(stock)
-                    if stock:
-                        user['favorites'].append({'name': stock['name'], 'price': stock['price'], 'best_price': stock['best_price']})
-                        update.message.reply_text("Инструмент " + str(stock) + " добавлен в избранное")
+                stock = check_stock(stock)
+                favorite = list(filter(lambda favorite: favorite["name"].lower() == stock['name'].lower(), user['favorites']))
+                favorite = favorite[0] if len(favorite)>0 else favorite
+                if favorite:
+                    update.message.reply_text("Инструмент " + str(stock['name']) + " уже в избранном")
+                else:
+                    user['favorites'].append({'name': stock['name'], 'price': stock['price'], 'best_price': stock['best_price']})
+                    update.message.reply_text("Инструмент " + str(stock['name']) + " добавлен в избранное")
             f.close()
-            f = open(id + ".json", "w")
+            f = open("users_data/"+id+".json", "w")
             json.dump(user, f)
         elif "удалить" in msg or "убрать" in msg:
             stocks_name = msg.split(" ")
             stocks_name = list(
                 filter(lambda word: word not in ["избранного", "удалить", "из", "убрать"], stocks_name))
             for stock in stocks_name:
-                if stock in user:
-                    pass
-                else:
-                    stock = check_stock(stock)
-                    logger.info(stock)
-                    if stock:
-                        favorite = filter(lambda favorite: favorite["name"] == stock, user['favorites'])[0]
-                        user['favorites'].remove(favorite)
-                        update.message.reply_text("Инструмент " + str(stock) + " удалён из избранного")
+                stock = check_stock(stock)
+                favorite = list(filter(lambda favorite: favorite["name"].lower() == stock['name'].lower(), user['favorites']))
+                favorite = favorite[0] if len(favorite)>0 else favorite
+                logger.info(favorite)
+                if favorite:
+                    user['favorites'].remove(favorite)
+                    update.message.reply_text("Инструмент " + str(stock['name']) + " удалён из избранного")
             f.close()
-            f = open(id + ".json", "w")
+            f = open("users_data/"+id+".json", "w")
             json.dump(user, f)
         else:
             for stock in user['favorites']:
                 res = get_stock_state(stock["name"])
                 update.message.reply_text(res)
+            if(len(user['favorites'])==0):
+                update.message.reply_text("Избранное пусто")
         f.close()
     elif "изменения" in msg:
         id = str(update.effective_user.id)
-        f = open(id + ".json", 'r')
+        f = open("users_data/"+id+".json", 'r')
         user = json.load(f)
-        logger.info(user)
     else:
         if type(res) == str:
             update.message.reply_text(res)
@@ -90,6 +90,11 @@ def check_stock(stock_name):
     if _stock:
         if "stock" in _stock:
             stock = _stock['stock'].to_dict()
+            candles = broker.get_profit_stat(stock, {'days': 1, 'hours': 0}, interval='day')
+            stock['price'] = candles[0].c
+            broker.set_candles(stock, {'days': 365, 'hours': 0}, interval='day')
+            best_price = broker.get_best_current_price()[-1]
+            stock['best_price'] = best_price
             return stock
         elif "stocks" in _stock:
             return False
@@ -133,11 +138,10 @@ def get_stock_state(stock_name):
 
 def track_users(update: Update, context: CallbackContext) -> None:
     """Store the user id of the incoming update, if any."""
-    logger.info(update.effective_user.id)
     id = str(update.effective_user.id)
     if not os.path.isfile("users_data/"+id+".json"):
         f = open("users_data/"+id+".json", "a")
-        f.write('{"id": '+id+'}')
+        f.write('{"id": '+id+', "favorites":[]}')
         f.close()
     # if context.user_data.get("name") is None:
     #     context.user_data["name"] = update.message.text
